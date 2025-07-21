@@ -1,7 +1,8 @@
 # ConRongChauTien
 
 Hướng dẫn Cài đặt và Chạy Chatbot với Anaconda
-Bước 1: Chuẩn bị Thư mục Dự án
+
+**Bước 1: Chuẩn bị Thư mục Dự án**
 
 Đảm bảo bạn đã có một thư mục chứa đầy đủ 4 file sau:
 
@@ -13,7 +14,7 @@ Bước 1: Chuẩn bị Thư mục Dự án
 
     merged_data.json
 
-Bước 2: Cài đặt Môi trường Anaconda
+**Bước 2: Cài đặt Môi trường Anaconda**
 
     Mở Terminal:
 
@@ -45,7 +46,7 @@ Bước 2: Cài đặt Môi trường Anaconda
 
         pip install -r requirements.txt
 
-Bước 3: Chạy Hệ thống
+**Bước 3: Chạy Hệ thống**
 
 Bạn sẽ cần hai cửa sổ Terminal riêng biệt, cả hai đều đã được kích hoạt môi trường chatbot_env.
 
@@ -71,7 +72,7 @@ Bạn sẽ cần hai cửa sổ Terminal riêng biệt, cả hai đều đã đ�
 
         streamlit run frontend_app.py
 
-Bước 4: Sử dụng Chatbot
+**Bước 4: Sử dụng Chatbot**
 
     Sau khi chạy lệnh streamlit, một tab trình duyệt mới sẽ tự động mở ra.
 
