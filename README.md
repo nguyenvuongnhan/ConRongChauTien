@@ -80,7 +80,7 @@ Bạn sẽ cần hai cửa sổ Terminal riêng biệt, cả hai đều đã đ�
 
     Sau khi token được chấp nhận, bạn có thể bắt đầu trò chuyện.
 
-Bước 5: Dừng Hệ thống
+**Bước 5: Dừng Hệ thống**
 
     Trong mỗi cửa sổ Terminal, nhấn tổ hợp phím Ctrl + C để dừng server.
 
