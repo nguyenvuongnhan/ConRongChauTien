@@ -15,6 +15,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain.chains import RetrievalQA
 from langchain_huggingface import HuggingFaceEndpoint
+from langchain.prompts import PromptTemplate
 
 # --- Khởi tạo ứng dụng FastAPI ---
 app = FastAPI(
@@ -32,17 +33,17 @@ class ChatResponse(BaseModel):
     result: str
     source_documents: list[dict]
 
-# --- Biến toàn cục để lưu trữ Retriever ---
-# Chỉ retriever được tạo sẵn, LLM sẽ được tạo theo từng request
+# --- Biến toàn cục để lưu trữ Retriever và Prompt ---
 retriever = None
+prompt_template = None
 
 # --- Hàm tải và chuẩn bị Retriever ---
-def load_retriever():
+def load_rag_dependencies():
     """
-    Tải dữ liệu, embed và khởi tạo retriever.
+    Tải dữ liệu, embed, khởi tạo retriever và prompt.
     Hàm này được gọi một lần khi server khởi động.
     """
-    global retriever
+    global retriever, prompt_template
     
     # 1. Tải dữ liệu từ file JSON
     jq_schema = '.[] | "Tên vị thuốc: " + .name + ". Chi tiết: " + .detail + ". Tóm tắt: " + .summaried'
@@ -66,18 +67,30 @@ def load_retriever():
     vectorstore = FAISS.from_documents(chunks, embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
     
-    print("✅ Retriever đã sẵn sàng!")
+    # *** SỬA LỖI: Đơn giản hóa mẫu prompt để tránh lặp ***
+    template = """
+    Dựa vào ngữ cảnh sau đây để trả lời câu hỏi một cách ngắn gọn và chính xác.
+
+    Ngữ cảnh: {context}
+
+    Câu hỏi: {question}
+
+    Câu trả lời:
+    """
+    prompt_template = PromptTemplate(template=template, input_variables=["context", "question"])
+    
+    print("✅ Retriever và Prompt đã sẵn sàng!")
 
 # --- Sự kiện khởi động server ---
 @app.on_event("startup")
 async def startup_event():
     print("🚀 Server đang khởi động và chuẩn bị dữ liệu...")
-    load_retriever()
+    load_rag_dependencies()
 
 # --- API Endpoint để chat ---
 @app.post("/chat", response_model=ChatResponse)
 async def chat_with_bot(request: ChatRequest):
-    if not retriever:
+    if not retriever or not prompt_template:
         raise HTTPException(status_code=503, detail="Hệ thống chưa sẵn sàng, vui lòng thử lại sau.")
     
     if not request.api_token:
@@ -85,19 +98,22 @@ async def chat_with_bot(request: ChatRequest):
 
     try:
         # Khởi tạo LLM với token được cung cấp trong request
-        # *** CẬP NHẬT: Chuyển sang model Llama-2-70b-hf ***
         llm = HuggingFaceEndpoint(
             repo_id="meta-llama/Llama-2-70b-hf",
             temperature=0.1,
             max_new_tokens=1024,
+            # *** SỬA LỖI: Thêm tham số chống lặp ***
+            repetition_penalty=1.2,
             huggingfacehub_api_token=request.api_token
         )
         
-        # Tạo chuỗi RAG với LLM vừa khởi tạo
+        # Thêm prompt tùy chỉnh vào chuỗi RAG
+        chain_type_kwargs = {"prompt": prompt_template}
         qa_chain = RetrievalQA.from_chain_type(
             llm=llm,
             chain_type="stuff",
             retriever=retriever,
+            chain_type_kwargs=chain_type_kwargs,
             return_source_documents=True
         )
 
