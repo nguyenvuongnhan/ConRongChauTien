@@ -1,0 +1,12 @@
+streamlit
+langchain
+langchain-huggingface
+langchain_community
+faiss-cpu
+sentence-transformers
+jq
+torch
+fastapi
+uvicorn
+requests
+pydantic
