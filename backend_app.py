@@ -1,138 +1,196 @@
 # -*- coding: utf-8 -*-
 """
-Backend API cho Chatbot Dược liệu Cổ truyền
-Sử dụng FastAPI để cung cấp endpoint cho việc hỏi đáp.
+Backend API cho Chatbot Dược liệu Cổ truyền (Kiến trúc CRAG - Hugging Face)
+Sử dụng FastAPI và LangGraph.
 """
-
 import os
-from fastapi import FastAPI, HTTPException, Depends
-from pydantic import BaseModel
-from typing import Optional
+from fastapi import FastAPI, HTTPException
+# *** SỬA LỖI: Sửa 'pantic' thành 'pydantic' ***
+from pydantic import BaseModel, Field
+from typing import List, Literal, Any
 
+# LangChain components
 from langchain_community.document_loaders import JSONLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
-from langchain.chains import RetrievalQA
 from langchain_huggingface import HuggingFaceEndpoint
-from langchain.prompts import PromptTemplate
+from langchain_community.tools import DuckDuckGoSearchRun
+from langchain.prompts import ChatPromptTemplate, PromptTemplate
+from langchain.schema import Document, StrOutputParser
+
+# LangGraph components
+from langgraph.graph import StateGraph, END, START
+from typing_extensions import TypedDict
 
 # --- Khởi tạo ứng dụng FastAPI ---
 app = FastAPI(
-    title="API Chatbot Dược liệu",
-    description="API cho phép hỏi đáp dựa trên ngữ liệu y học cổ truyền.",
-    version="1.0.0",
+    title="API Chatbot Dược liệu (CRAG - Hugging Face)",
+    description="API cho chatbot nâng cao chỉ sử dụng Hugging Face.",
+    version="2.4.0",
 )
 
 # --- Định nghĩa model cho request và response ---
 class ChatRequest(BaseModel):
     query: str
-    api_token: Optional[str] = None
+    huggingface_api_key: str
 
 class ChatResponse(BaseModel):
-    result: str
-    source_documents: list[dict]
+    generation: str
+    documents: List[str]
 
-# --- Biến toàn cục để lưu trữ Retriever và Prompt ---
+# --- Biến toàn cục để lưu trữ Retriever ---
 retriever = None
-prompt_template = None
 
-# --- Hàm tải và chuẩn bị Retriever ---
-def load_rag_dependencies():
-    """
-    Tải dữ liệu, embed, khởi tạo retriever và prompt.
-    Hàm này được gọi một lần khi server khởi động.
-    """
-    global retriever, prompt_template
-    
-    # 1. Tải dữ liệu từ file JSON
+def load_retriever():
+    global retriever
     jq_schema = '.[] | "Tên vị thuốc: " + .name + ". Chi tiết: " + .detail + ". Tóm tắt: " + .summaried'
-    loader = JSONLoader(
-        file_path='./merged_data.json',
-        jq_schema=jq_schema,
-        text_content=True
-    )
+    loader = JSONLoader(file_path='./merged_data.json', jq_schema=jq_schema, text_content=True)
     documents = loader.load()
-
-    # 2. Chia nhỏ văn bản
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
     chunks = text_splitter.split_documents(documents)
-
-    # 3. Tạo embeddings
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-    )
-
-    # 4. Lưu vào Vector Store và tạo retriever
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
     vectorstore = FAISS.from_documents(chunks, embeddings)
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-    
-    # *** SỬA LỖI: Đơn giản hóa mẫu prompt để tránh lặp ***
-    template = """
-    Dựa vào ngữ cảnh sau đây để trả lời câu hỏi một cách ngắn gọn và chính xác.
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
+    print("✅ Retriever đã sẵn sàng!")
 
-    Ngữ cảnh: {context}
-
-    Câu hỏi: {question}
-
-    Câu trả lời:
-    """
-    prompt_template = PromptTemplate(template=template, input_variables=["context", "question"])
-    
-    print("✅ Retriever và Prompt đã sẵn sàng!")
-
-# --- Sự kiện khởi động server ---
 @app.on_event("startup")
 async def startup_event():
     print("🚀 Server đang khởi động và chuẩn bị dữ liệu...")
-    load_rag_dependencies()
+    load_retriever()
+
+# --- Định nghĩa State và các Node của Graph ---
+class GraphState(TypedDict):
+    question: str
+    generation: str
+    documents: List[Document]
+    # *** CẬP NHẬT: Quay lại quản lý 1 mô hình LLM duy nhất ***
+    llm: Any
+
+def retrieve_node(state):
+    print("---NODE: RETRIEVE---")
+    documents = retriever.invoke(state["question"])
+    return {"documents": documents}
+
+def grade_documents_node(state):
+    print("---NODE: GRADE DOCUMENTS---")
+    question = state["question"]
+    documents = state["documents"]
+    llm = state["llm"]
+
+    system = "Bạn là người đánh giá mức độ liên quan của tài liệu với câu hỏi. Chỉ trả lời 'yes' nếu tài liệu liên quan, ngược lại trả lời 'no'."
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system),
+        ("human", "Tài liệu:\n\n{document}\n\nCâu hỏi: {question}"),
+    ])
+    grader = prompt | llm | StrOutputParser()
+    
+    filtered_docs = []
+    for d in documents:
+        score = grader.invoke({"question": question, "document": d.page_content})
+        grade = score.strip().lower()
+        if 'yes' in grade:
+            print("---GRADE: RELEVANT---")
+            filtered_docs.append(d)
+        else:
+            print("---GRADE: NOT RELEVANT---")
+    return {"documents": filtered_docs}
+
+def transform_query_node(state):
+    print("---NODE: TRANSFORM QUERY---")
+    question = state["question"]
+    llm = state["llm"]
+
+    system = "Bạn là người viết lại câu hỏi để tối ưu hóa cho tìm kiếm web."
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system),
+        ("human", "Câu hỏi ban đầu: {question}\n\nHãy tạo ra một câu hỏi cải tiến:"),
+    ])
+    rewriter = prompt | llm | StrOutputParser()
+    better_question = rewriter.invoke({"question": question})
+    return {"question": better_question}
+
+def web_search_node(state):
+    print("---NODE: WEB SEARCH---")
+    question = state["question"]
+    documents = state["documents"]
+    
+    web_search_tool = DuckDuckGoSearchRun()
+    web_results = web_search_tool.run(question)
+    web_results_doc = Document(page_content=web_results)
+    if documents is None:
+        documents = []
+    documents.append(web_results_doc)
+    return {"documents": documents}
+
+def generate_node(state):
+    print("---NODE: GENERATE---")
+    question = state["question"]
+    documents = state["documents"]
+    llm = state["llm"]
+    
+    prompt_template = PromptTemplate.from_template(
+        "Dựa vào ngữ cảnh sau đây để trả lời câu hỏi bằng tiếng Việt.\n\nNgữ cảnh: {context}\n\nCâu hỏi: {question}\n\nCâu trả lời:"
+    )
+    rag_chain = prompt_template | llm | StrOutputParser()
+    generation = rag_chain.invoke({"context": documents, "question": question})
+    return {"generation": generation}
+
+def decide_to_generate_edge(state):
+    print("---EDGE: DECIDE TO GENERATE---")
+    if not state["documents"]:
+        return "transform_query"
+    else:
+        return "generate"
 
 # --- API Endpoint để chat ---
-@app.post("/chat", response_model=ChatResponse)
+@app.post("/chat")
 async def chat_with_bot(request: ChatRequest):
-    if not retriever or not prompt_template:
-        raise HTTPException(status_code=503, detail="Hệ thống chưa sẵn sàng, vui lòng thử lại sau.")
+    if not retriever:
+        raise HTTPException(status_code=503, detail="Hệ thống chưa sẵn sàng.")
     
-    if not request.api_token:
-        raise HTTPException(status_code=400, detail="Hugging Face API Token là bắt buộc.")
+    # *** CẬP NHẬT: Khởi tạo 1 mô hình LLM duy nhất ***
+    llm = HuggingFaceEndpoint(
+        repo_id="meta-llama/Llama-2-70b-hf",
+        temperature=0.1,
+        max_new_tokens=1024,
+        repetition_penalty=1.2,
+        huggingfacehub_api_token=request.huggingface_api_key
+    )
 
+    # Xây dựng Graph
+    workflow = StateGraph(GraphState)
+    workflow.add_node("retrieve", retrieve_node)
+    workflow.add_node("grade_documents", grade_documents_node)
+    workflow.add_node("transform_query", transform_query_node)
+    workflow.add_node("web_search", web_search_node)
+    workflow.add_node("generate", generate_node)
+    
+    workflow.add_edge(START, "retrieve")
+    workflow.add_edge("retrieve", "grade_documents")
+    workflow.add_conditional_edges("grade_documents", decide_to_generate_edge, {
+        "transform_query": "transform_query",
+        "generate": "generate"
+    })
+    workflow.add_edge("transform_query", "web_search")
+    workflow.add_edge("web_search", "generate")
+    workflow.add_edge("generate", END)
+
+    crag_app = workflow.compile()
+    
     try:
-        # Khởi tạo LLM với token được cung cấp trong request
-        llm = HuggingFaceEndpoint(
-            repo_id="meta-llama/Llama-2-70b-hf",
-            temperature=0.1,
-            max_new_tokens=1024,
-            # *** SỬA LỖI: Thêm tham số chống lặp ***
-            repetition_penalty=1.2,
-            huggingfacehub_api_token=request.api_token
-        )
+        # *** CẬP NHẬT: Truyền 1 LLM duy nhất vào state ban đầu ***
+        inputs = {
+            "question": request.query, 
+            "llm": llm
+        }
+        final_state = crag_app.invoke(inputs)
         
-        # Thêm prompt tùy chỉnh vào chuỗi RAG
-        chain_type_kwargs = {"prompt": prompt_template}
-        qa_chain = RetrievalQA.from_chain_type(
-            llm=llm,
-            chain_type="stuff",
-            retriever=retriever,
-            chain_type_kwargs=chain_type_kwargs,
-            return_source_documents=True
-        )
-
-        response = qa_chain.invoke({"query": request.query})
+        doc_contents = [doc.page_content for doc in final_state.get('documents', [])]
         
-        # Chuyển đổi Document objects thành dict để tương thích JSON
-        source_docs = [
-            {"page_content": doc.page_content, "metadata": doc.metadata} 
-            for doc in response.get('source_documents', [])
-        ]
-        
-        return ChatResponse(
-            result=response.get('result', "Xin lỗi, tôi không tìm thấy câu trả lời."),
-            source_documents=source_docs
-        )
+        return {
+            "generation": final_state.get('generation', "Không thể tạo câu trả lời."),
+            "documents": doc_contents
+        }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# --- Endpoint kiểm tra sức khỏe ---
-@app.get("/")
-def read_root():
-    return {"status": "API Chatbot đang hoạt động!"}
+        raise HTTPException(status_code=500, detail=f"Lỗi trong quá trình xử lý của graph: {e}")
