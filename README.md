@@ -85,7 +85,7 @@ Bạn sẽ cần hai cửa sổ Terminal riêng biệt, cả hai đều đã đ�
 
         uvicorn backend_app:app --reload
 
-        Server sẽ khởi động và bạn sẽ thấy thông báo nó đang chạy tại https://www.google.com/search?q=http://127.0.0.1:8000. Hãy giữ cửa sổ này mở.
+        Server sẽ khởi động và bạn sẽ thấy thông báo nó đang chạy tại http://127.0.0.1:8000. Hãy giữ cửa sổ này mở.
 
     Chạy Frontend (Giao diện Chat):
 
