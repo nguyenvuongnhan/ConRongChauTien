@@ -2,6 +2,7 @@ streamlit
 langchain
 langchain-huggingface
 langchain_community
+langchain-ollama
 faiss-cpu
 sentence-transformers
 jq
