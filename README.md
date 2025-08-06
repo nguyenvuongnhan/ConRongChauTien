@@ -2,7 +2,32 @@
 
 Hướng dẫn Cài đặt và Chạy Chatbot với Anaconda
 
-**Bước 1: Chuẩn bị Thư mục Dự án**
+
+**Bước 1: Cài đặt Ollama**
+
+Trước tiên, bạn cần tải và cài đặt ứng dụng Ollama cho hệ điều hành của mình.
+
+    Truy cập trang web chính thức: ollama.com
+
+    Nhấn vào nút "Download" và chọn phiên bản phù hợp với hệ điều hành của bạn (Windows, macOS, hoặc Linux).
+
+    Chạy file cài đặt vừa tải về và làm theo các hướng dẫn. Sau khi cài đặt xong, Ollama sẽ tự động chạy dưới dạng một dịch vụ nền trên máy của bạn.
+
+Để kiểm tra xem Ollama đã được cài đặt thành công chưa, hãy mở cửa sổ dòng lệnh (Terminal, Command Prompt, hoặc PowerShell) và gõ: ollama --version
+
+
+
+**Bước 2: Tải Mô Hình (Pull a Model)**
+
+Sau khi cài đặt Ollama, bạn cần tải một mô hình ngôn ngữ lớn (LLM) để sử dụng. Bạn có thể tìm danh sách các mô hình có sẵn tại thư viện của Ollama.
+
+Mở cửa sổ dòng lệnh và sử dụng lệnh ollama pull theo sau là tên mô hình bạn muốn.
+
+Chạy và Tương tác với Mô Hình:
+ollama run qwen3:30b
+
+
+**Bước 3: Chuẩn bị Thư mục Dự án**
 
 Đảm bảo bạn đã có một thư mục chứa đầy đủ 4 file sau:
 
@@ -14,7 +39,7 @@ Hướng dẫn Cài đặt và Chạy Chatbot với Anaconda
 
     merged_data.json
 
-**Bước 2: Cài đặt Môi trường Anaconda**
+**Bước 4: Cài đặt Môi trường Anaconda**
 
     Mở Terminal:
 
@@ -46,7 +71,7 @@ Hướng dẫn Cài đặt và Chạy Chatbot với Anaconda
 
         pip install -r requirements.txt
 
-**Bước 3: Chạy Hệ thống**
+**Bước 5: Chạy Hệ thống**
 
 Bạn sẽ cần hai cửa sổ Terminal riêng biệt, cả hai đều đã được kích hoạt môi trường chatbot_env.
 
@@ -72,7 +97,7 @@ Bạn sẽ cần hai cửa sổ Terminal riêng biệt, cả hai đều đã đ�
 
         streamlit run frontend_app.py
 
-**Bước 4: Sử dụng Chatbot**
+**Bước 6: Sử dụng Chatbot**
 
     Sau khi chạy lệnh streamlit, một tab trình duyệt mới sẽ tự động mở ra.
 
@@ -80,7 +105,7 @@ Bạn sẽ cần hai cửa sổ Terminal riêng biệt, cả hai đều đã đ�
 
     Sau khi token được chấp nhận, bạn có thể bắt đầu trò chuyện.
 
-**Bước 5: Dừng Hệ thống**
+**Bước 7: Dừng Hệ thống**
 
     Trong mỗi cửa sổ Terminal, nhấn tổ hợp phím Ctrl + C để dừng server.
 
