@@ -1,5 +1,7 @@
 import json
 import torch
+import re
+import time
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Any, Union
@@ -56,47 +58,47 @@ def retrieve_node(state):
     return {"documents": documents}
 
 
-# def grade_documents_node(state):
-#     question = state["question"]
-#     documents = state["documents"]
-#     llm = state["llm"]
+def grade_documents_node(state):
+    question = state["question"]
+    documents = state["documents"]
+    llm = state["llm"]
 
-#     system = """You are a document relevance grader for a chatbot that assists in Vietnamese traditional medicine. Your goal is to filter out document that is not relevant to the user's question.
+    system = """You are a document relevance grader for a chatbot that assists in Vietnamese traditional medicine. Your goal is to filter out document that is not relevant to the user's question.
 
-#     Instructions:
-#     1. A document is considered RELEVANT ('yes') if it contains information that is relevant to the user's question, even if it does not cover every single detail in the question.
-#     2. A document is NOT RELEVANT ('no') only if it is completely off-topic.
-#     3. Your job is to filter out entirely irrelevant documents, not to answer the question. Do not be overly strict.
+    Instructions:
+    1. A document is considered RELEVANT ('y') if it contains information that is relevant to the user's question, even if it does not cover every single detail in the question.
+    2. A document is NOT RELEVANT ('n') only if it is completely off-topic.
+    3. Your job is to filter out entirely irrelevant documents, not to answer the question. Do not be overly strict.
     
-#     Conclude with a single word: 'yes' or 'no'."""
+    Conclude with a single character: 'y' if relevant or 'n' if not relevant. /no_think"""
     
-#     prompt = ChatPromptTemplate.from_messages([
-#         ("system", system),
-#         ("human", "Document:\n\n{document}\n\nQuestion: {question}"),
-#     ])
-#     grader = prompt | llm | StrOutputParser()
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system),
+        ("human", "Document:\n\n{document}\n\nQuestion: {question}"),
+    ])
+    grader = prompt | llm | StrOutputParser()
     
-#     filtered_docs = []
-#     grading_results_log = []
+    filtered_docs = []
+    grading_results_log = []
 
-#     for d in documents:
-#         doc_content = d.metadata.get("source_record") 
-#         if not doc_content:
-#             continue
-#         response_str = grader.invoke({"question": question, "document": doc_content})
-#         decision_part = re.sub(r"<think>.*?</think>", "", response_str, flags=re.DOTALL).strip().lower()
-#         final_word = decision_part.split()[-1] if decision_part.split() else ""
-#         grade = "no"
-#         if "yes" in final_word:
-#             grade = "yes"
-#             filtered_docs.append(d)
-#         doc_name = doc_content.get('name', 'Unknown')[:40]
-#         grading_results_log.append(f"  - Doc: '{doc_name}...' -> Grade: {grade.upper()}")
+    for d in documents:
+        doc_content = d.metadata.get("source_record") 
+        if not doc_content:
+            continue
+        response_str = grader.invoke({"question": question, "document": doc_content})
+        decision_part = re.sub(r"<think>.*?</think>", "", response_str, flags=re.DOTALL).strip().lower()
+        final_word = decision_part.split()[-1] if decision_part.split() else ""
+        grade = "no"
+        if "y" in final_word:
+            grade = "yes"
+            filtered_docs.append(d)
+        doc_name = doc_content.get('name', 'Unknown')[:40]
+        grading_results_log.append(f"  - Doc: '{doc_name}...' -> Grade: {grade.upper()}")
 
-#     print("---NODE: GRADE DOCUMENTS (Completed)---")
-#     print("\n".join(grading_results_log))
+    print("---NODE: GRADE DOCUMENTS (Completed)---")
+    print("\n".join(grading_results_log))
     
-#     return {"documents": filtered_docs}
+    return {"documents": filtered_docs}
 
 
 def rerank_documents_node(state):
@@ -131,8 +133,8 @@ def rerank_documents_node(state):
         rerank_log.append(f"  - Doc: '{doc_name}...' -> Score: {score:.4f}")
         if score > 0.3:
             final_docs.append(doc)
-        # Limit to the top 5 most relevant documents
-        if len(final_docs) >= 5:
+        # Limit to the top 8 most relevant documents
+        if len(final_docs) >= 8:
             break
     print("\n".join(rerank_log))
     print(f"  Passing {len(final_docs)} documents to the generator.")
@@ -159,8 +161,6 @@ def generate_node(state):
     5.  Conclude with a summary statement if appropriate.
     6.  Do not make up information. Base your entire answer ONLY on the provided context.
     7.  Your final, synthesized answer must be in **Vietnamese**.
-
-    Note: The documents are sorted by their relevance in descending order (most relevant first).
 
     Context:
     {context}
@@ -192,29 +192,29 @@ def load_and_prepare_rag():
         )
         doc = Document(page_content=page_content, metadata={'source_record': record})
         documents.append(doc)
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=40)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=100)
     chunks = text_splitter.split_documents(documents)
     model_kwargs = {"device": device, "trust_remote_code": True}
     embeddings = HuggingFaceEmbeddings(
-        model_name="Alibaba-NLP/gte-multilingual-base",
+        model_name="BAAI/bge-m3",
         model_kwargs=model_kwargs
     )
     vectorstore = FAISS.from_documents(chunks, embeddings)
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 8})
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 30})
     print("✅ Retriever đã sẵn sàng!")
 
-    reranker = CrossEncoder('Alibaba-NLP/gte-multilingual-reranker-base', max_length=8192, device=device, trust_remote_code=True)
+    reranker = CrossEncoder('BAAI/bge-reranker-v2-m3', max_length=8192, device=device, trust_remote_code=True)
     print("✅ Reranker đã sẵn sàng!")
 
     workflow = StateGraph(GraphState)
     workflow.add_node("retrieve", retrieve_node)
-    # workflow.add_node("grade_documents", grade_documents_node)
+    workflow.add_node("grade_documents", grade_documents_node)
     workflow.add_node("rerank_documents", rerank_documents_node)
     workflow.add_node("generate", generate_node)
     workflow.add_edge(START, "retrieve")
-    # workflow.add_edge("retrieve", "grade_documents")
-    # workflow.add_edge("grade_documents", "generate")
-    workflow.add_edge("retrieve", "rerank_documents")
+    workflow.add_edge("retrieve", "grade_documents")
+    workflow.add_edge("grade_documents", "rerank_documents")
+    # workflow.add_edge("retrieve", "rerank_documents")
     workflow.add_edge("rerank_documents", "generate")
     workflow.add_edge("generate", END)
     rag_app = workflow.compile()
@@ -225,7 +225,7 @@ def load_and_prepare_rag():
 async def chat_with_bot(request: ChatRequest):
     if not retriever or not rag_app:
         raise HTTPException(status_code=503, detail="Hệ thống chưa sẵn sàng.")
-    llm = OllamaLLM(model="qwen3:30b", num_ctx=10000)
+    llm = OllamaLLM(model="qwen3:8b", num_ctx=10000)
     try:
         inputs = {"question": request.query, "llm": llm}
         final_state = rag_app.invoke(inputs)
@@ -241,17 +241,19 @@ async def chat_with_bot(request: ChatRequest):
 if __name__ == "__main__":
     print("--- CHẠY THỬ NGHIỆM BACKEND ---")
     load_and_prepare_rag()
-    llm = OllamaLLM(model="qwen3:30b", num_ctx=10000)
-    test_query = "vị thuốc nào có tác dụng bổ huyết và cầm máu?"
+    llm = OllamaLLM(model="qwen3:8b", num_ctx=10000, reasoning=None)
+    test_query = "Tác dụng chính của SINH ĐỊA HOÀNG là gì và ai không nên dùng?"
     print(f"\n❓ Câu hỏi thử nghiệm: {test_query}")
     inputs = {"question": test_query, "llm": llm}
     print("\n\n--- QUÁ TRÌNH XỬ LÝ CỦA GRAPH ---")
     final_state = None
+    start_time = time.perf_counter()
     for step in rag_app.stream(inputs):
         node_name = list(step.keys())[0]
         state_after_node = step[node_name]
         print(f"\n--- Đã hoàn thành Node: {node_name} ---")
         final_state = state_after_node
+    end_time = time.perf_counter()
     print("\n\n--- KẾT QUẢ CUỐI CÙNG ---")
     print("\n💬 Câu trả lời của Bot:")
     print(final_state.get('generation', "Không có câu trả lời."))
@@ -264,3 +266,5 @@ if __name__ == "__main__":
             print("-" * 20)
     else:
         print("Không có nguồn tài liệu nào được sử dụng.")
+    elapsed_time = end_time - start_time
+    print(f"Execution time: {elapsed_time:.6f} seconds")
